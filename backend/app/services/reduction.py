@@ -2,6 +2,7 @@ import asyncio
 import math
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,7 @@ from backend.app.core.logging import logger
 from backend.app.models.candidate import Candidate, CandidateView
 from backend.app.models.imagery import Imagery
 from backend.app.schemas.candidate import CandidateDTO
+from backend.app.services.cache import ImageCacheManager, cache_manager
 from backend.app.services.job_runner import JobManager, job_manager
 
 
@@ -38,9 +40,11 @@ class CandidateReductionService:
     def __init__(
         self,
         job_mgr: Optional[JobManager] = None,
+        image_cache: Optional[ImageCacheManager] = None,
         settings: Optional[Settings] = None,
     ):
         self.jobs = job_mgr or job_manager
+        self.cache = image_cache or cache_manager
         self.settings = settings or get_settings()
 
     async def reduce_and_promote_candidates(
@@ -163,13 +167,21 @@ class CandidateReductionService:
                 # Classify material and size from primary view image
                 material = "brick"
                 size_class = "large" if len(cl) >= 3 else "medium"
-                if primary_view_row.file_path and Path(primary_view_row.file_path).exists():
+                view_img_path = None
+                if primary_view_row.local_path and Path(primary_view_row.local_path).exists():
+                    view_img_path = Path(primary_view_row.local_path)
+                elif primary_view_row.file_hash:
+                    vp = await self.cache.get_image_path(primary_view_row.file_hash)
+                    if vp and vp.exists():
+                        view_img_path = vp
+
+                if view_img_path and view_img_path.exists():
                     try:
                         from PIL import Image
                         from backend.app.providers.registry import registry
                         ranker = registry._vision_rankers.get("openclip") or registry._vision_rankers.get("siglip2")
                         if ranker and hasattr(ranker, "classify_material_and_size"):
-                            with Image.open(primary_view_row.file_path) as pimg:
+                            with Image.open(view_img_path) as pimg:
                                 mat, conf, s_cls = ranker.classify_material_and_size(pimg)
                                 material = mat
                                 if s_cls:

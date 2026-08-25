@@ -124,7 +124,7 @@ export default function ImageryGallery({ theme, onImageryUpdated }) {
 
   return (
     <div className="glass-card" style={{ padding: '24px', marginBottom: '24px' }}>
-      
+
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -372,7 +372,7 @@ export default function ImageryGallery({ theme, onImageryUpdated }) {
                   loading="lazy"
                   onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
-                
+
                 {/* Heading Badge */}
                 <div style={{
                   position: 'absolute',
@@ -442,7 +442,7 @@ export default function ImageryGallery({ theme, onImageryUpdated }) {
           justifyContent: 'center',
           padding: '24px',
         }}
-        onClick={() => setSelectedImage(null)}
+          onClick={() => setSelectedImage(null)}
         >
           <div
             style={{
