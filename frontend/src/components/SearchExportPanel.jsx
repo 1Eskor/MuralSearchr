@@ -380,7 +380,10 @@ export default function SearchExportPanel({ theme }) {
           fontSize: '0.88rem',
         }}>
           <Filter size={36} color="var(--text-muted)" style={{ margin: '0 auto 12px auto', display: 'block' }} />
-          No wall targets match your search filters. Adjust minimum score or material above.
+          No mural targets available yet.
+          <div style={{ fontSize: '0.78rem', marginTop: '6px', color: 'var(--text-muted)' }}>
+            Complete the wall prospecting pipeline above to export and search candidate targets.
+          </div>
         </div>
       ) : (
         <div style={{

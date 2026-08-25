@@ -10,7 +10,6 @@ from backend.app.core.config import Settings, get_settings
 from backend.app.core.logging import logger
 from backend.app.providers.base import ProviderInfo, ProviderStatus
 from backend.app.providers.imagery.base import ImageryProvider, StreetImageMetadata
-from backend.app.providers.imagery.mock import MockImageryProvider
 
 
 class MapillaryProvider(ImageryProvider):
@@ -24,7 +23,6 @@ class MapillaryProvider(ImageryProvider):
     def __init__(self, settings: Optional[Settings] = None, timeout_seconds: float = 10.0):
         self.settings = settings or get_settings()
         self.timeout_seconds = timeout_seconds
-        self.mock_fallback = MockImageryProvider()
 
     @property
     def token(self) -> str:
@@ -67,8 +65,8 @@ class MapillaryProvider(ImageryProvider):
         Query Mapillary Graph API v4 for street photos within a bounding box around (lat, lon).
         """
         if not self.is_configured:
-            logger.debug(f"Mapillary token not configured; generating realistic sample street imagery at ({lat}, {lon})")
-            return await self._generate_fallback_imagery(lat, lon, max_images)
+            logger.warning("Mapillary client token not configured in .env.")
+            return []
 
         # Calculate bounding box around center point in degrees
         lat_delta = radius_meters / 111320.0
@@ -121,14 +119,14 @@ class MapillaryProvider(ImageryProvider):
                         )
 
                     logger.info(f"Retrieved {len(results)} street images from Mapillary at ({lat:.5f}, {lon:.5f})")
-                    return results if results else await self._generate_fallback_imagery(lat, lon, max_images)
+                    return results
                 else:
                     logger.warning(f"Mapillary API returned status {resp.status_code}: {resp.text}")
 
         except Exception as e:
-            logger.warning(f"Mapillary query failed: {e}; falling back to synthetic imagery generator")
+            logger.warning(f"Mapillary query failed at ({lat:.5f}, {lon:.5f}): {e}")
 
-        return await self._generate_fallback_imagery(lat, lon, max_images)
+        return []
 
     async def download_image(
         self,
@@ -148,106 +146,13 @@ class MapillaryProvider(ImageryProvider):
         )
 
         if is_live_url:
-            try:
-                headers = {"Authorization": f"OAuth {self.token}"} if self.is_configured else {}
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(image_meta.source_url, headers=headers)
-                    if resp.status_code == 200 and len(resp.content) > 500:
-                        destination_path.write_bytes(resp.content)
-                        return destination_path
-            except Exception as e:
-                logger.warning(f"Failed to download remote image from {image_meta.source_url}: {e}")
+            headers = {"Authorization": f"OAuth {self.token}"} if self.is_configured else {}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(image_meta.source_url, headers=headers)
+                if resp.status_code == 200 and len(resp.content) > 500:
+                    destination_path.write_bytes(resp.content)
+                    return destination_path
+                else:
+                    logger.warning(f"Failed to download image {image_meta.id} (status: {resp.status_code})")
 
-        # Fallback generator for simulated imagery or if remote download fails
-        return await self._create_wall_simulation_image(image_meta, destination_path)
-
-    async def _generate_fallback_imagery(
-        self,
-        lat: float,
-        lon: float,
-        count: int = 3,
-    ) -> List[StreetImageMetadata]:
-        """
-        Generate realistic multi-perspective street view metadata for testing.
-        """
-        results: List[StreetImageMetadata] = []
-        headings = [0.0, 90.0, 180.0, 270.0, 45.0, 135.0, 225.0, 315.0]
-
-        for i in range(min(count, 4)):
-            img_id = f"mly_sim_{uuid.uuid4().hex[:10]}"
-            heading = headings[i % len(headings)]
-            # Slight offset along street
-            offset_lat = (i * 0.00008)
-            offset_lon = (i * 0.00008)
-
-            results.append(
-                StreetImageMetadata(
-                    id=img_id,
-                    provider="mapillary",
-                    latitude=lat + offset_lat,
-                    longitude=lon + offset_lon,
-                    heading=heading,
-                    pitch=0.0,
-                    capture_date=datetime.datetime.utcnow() - datetime.timedelta(days=i * 15),
-                    source_url=f"http://mapillary.fallback/{img_id}.jpg",
-                    width=1024,
-                    height=768,
-                    is_panoramic=False,
-                    extra_metadata={"simulated": True, "texture_type": "brick_facade" if i % 2 == 0 else "concrete_wall"},
-                )
-            )
-        return results
-
-    async def _create_wall_simulation_image(
-        self,
-        image_meta: StreetImageMetadata,
-        destination_path: Path,
-    ) -> Path:
-        """
-        Render a high-contrast simulated street facade photo with building textures.
-        """
-        w, h = 1024, 768
-        # Select palette based on image ID hash
-        hash_val = hash(image_meta.id) % 3
-        if hash_val == 0:
-            # Industrial Red Brick
-            wall_color = (168, 64, 50)
-            mortar_color = (120, 45, 35)
-            sky_color = (135, 180, 220)
-        elif hash_val == 1:
-            # Clean Concrete / Stucco Facade
-            wall_color = (180, 185, 190)
-            mortar_color = (150, 155, 160)
-            sky_color = (120, 170, 215)
-        else:
-            # Commercial Warehouse Exterior
-            wall_color = (195, 175, 140)
-            mortar_color = (160, 140, 110)
-            sky_color = (140, 185, 230)
-
-        img = Image.new("RGB", (w, h), color=wall_color)
-        draw = ImageDraw.Draw(img)
-
-        # Draw Sky portion at top 20%
-        draw.rectangle([(0, 0), (w, int(h * 0.22))], fill=sky_color)
-
-        # Draw Sidewalk / Street portion at bottom 18%
-        draw.rectangle([(0, int(h * 0.82)), (w, h)], fill=(60, 65, 70))
-        draw.line([(0, int(h * 0.82)), (w, int(h * 0.82))], fill=(100, 105, 110), width=4)
-
-        # Draw Brick / Joint lines on the wall
-        for y in range(int(h * 0.22), int(h * 0.82), 24):
-            draw.line([(0, y), (w, y)], fill=mortar_color, width=2)
-        for x in range(0, w, 50):
-            draw.line([(x, int(h * 0.22)), (x, int(h * 0.82))], fill=mortar_color, width=1)
-
-        # Overlay Camera & GPS telemetry watermark banner
-        banner_h = 50
-        draw.rectangle([(0, h - banner_h), (w, h)], fill=(15, 23, 42))
-        heading_text = f"Heading: {image_meta.heading:.1f}°" if image_meta.heading is not None else "Heading: N/A"
-        date_str = image_meta.capture_date.strftime("%Y-%m-%d") if image_meta.capture_date else "Recent"
-        watermark = f"Mural Search Imagery Ingestion  |  ID: {image_meta.id}  |  Lat: {image_meta.latitude:.5f}, Lon: {image_meta.longitude:.5f}  |  {heading_text}  |  Captured: {date_str}"
-        draw.text((20, h - 32), watermark, fill=(240, 245, 255))
-
-        img.save(destination_path, format="JPEG", quality=90)
-        return destination_path
+        raise ValueError(f"Unable to download real street imagery for {image_meta.id} from {image_meta.source_url}")

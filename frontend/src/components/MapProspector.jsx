@@ -390,6 +390,33 @@ export default function MapProspector({ theme, onWallSelected }) {
         {/* MapLibre Canvas Container */}
         <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
+        {/* Standby Empty State Overlay when no candidates exist */}
+        {candidates.length === 0 && (
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(15, 23, 42, 0.88)',
+            backdropFilter: 'blur(16px)',
+            border: '1px dashed rgba(255, 255, 255, 0.2)',
+            borderRadius: '12px',
+            padding: '24px 32px',
+            textAlign: 'center',
+            zIndex: 10,
+            maxWidth: '440px',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
+          }}>
+            <MapPin size={32} color="#10b981" style={{ margin: '0 auto 8px auto', display: 'block' }} />
+            <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', marginBottom: '4px' }}>
+              Map Prospector Ready
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+              No mural wall candidates generated yet. Complete Phase 2 geographic sampling and Phase 3 imagery ingestion above to prospect wall targets on this map.
+            </div>
+          </div>
+        )}
+
         {/* Slide-out Wall Inspection Drawer */}
         {selectedWall && (
           <div

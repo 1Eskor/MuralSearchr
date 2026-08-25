@@ -463,7 +463,10 @@ export default function ScoringEnginePanel({ theme, onScoringFinished }) {
           fontSize: '0.88rem',
         }}>
           <Award size={36} color="var(--text-muted)" style={{ margin: '0 auto 12px auto', display: 'block' }} />
-          No ranked wall candidates available.
+          No ranked wall candidates available yet.
+          <div style={{ fontSize: '0.78rem', marginTop: '6px', color: 'var(--text-muted)' }}>
+            Complete the previous pipeline phases above to rank physical walls with the multi-criteria composite scoring engine.
+          </div>
         </div>
       ) : (
         <div style={{

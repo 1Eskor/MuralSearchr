@@ -327,7 +327,10 @@ export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
           fontSize: '0.88rem',
         }}>
           <GitMerge size={36} color="var(--text-muted)" style={{ margin: '0 auto 12px auto', display: 'block' }} />
-          No clustered wall entities available. Run deduplication above.
+          No clustered wall entities available yet.
+          <div style={{ fontSize: '0.78rem', marginTop: '6px', color: 'var(--text-muted)' }}>
+            Complete the previous pipeline phases, then click <strong>"Run Deduplication & View Clustering"</strong> above to merge multi-angle perspectives into canonical physical walls.
+          </div>
         </div>
       ) : (
         <div style={{
