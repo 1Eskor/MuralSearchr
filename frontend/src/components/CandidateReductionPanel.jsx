@@ -25,6 +25,8 @@ import {
   fetchJob,
 } from '../services/api';
 
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
+
 export default function CandidateReductionPanel({ theme, onReductionFinished }) {
   const [candidates, setCandidates] = useState([]);
   const [stats, setStats] = useState(null);
@@ -460,6 +462,7 @@ export default function CandidateReductionPanel({ theme, onReductionFinished }) 
                   alt={`Candidate ${c.id}`}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   loading="lazy"
+                  onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
 
                 {/* Candidate Badge */}
@@ -595,7 +598,8 @@ export default function CandidateReductionPanel({ theme, onReductionFinished }) 
                 src={selectedCandidate.primary_view_preview_url}
                 alt="Primary Perspective View"
                 style={{ maxHeight: '380px', width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
-              />
+                onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
             </div>
 
             {/* Sibling Directional Perspectives Filmstrip */}
@@ -613,7 +617,8 @@ export default function CandidateReductionPanel({ theme, onReductionFinished }) 
                       overflow: 'hidden',
                       border: v.is_primary ? '2px solid #ec4899' : '1px solid var(--border-subtle)',
                     }}>
-                      <img src={v.preview_url} alt="view" style={{ width: '120px', height: '80px', objectFit: 'cover' }} />
+                      <img src={v.preview_url} alt="view" style={{ width: '120px', height: '80px', objectFit: 'cover' }}   onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
                       <div style={{ padding: '4px 6px', fontSize: '0.68rem', textAlign: 'center' }}>
                         <strong style={{ color: '#38bdf8' }}>{getCompassDirection(v.view_heading)}</strong>
                         {v.is_primary && <span style={{ color: '#ec4899', display: 'block', fontWeight: 700 }}>Primary</span>}

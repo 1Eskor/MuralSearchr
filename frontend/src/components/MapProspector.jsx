@@ -18,8 +18,11 @@ import {
 } from 'lucide-react';
 import { fetchClusteredWalls, fetchSearchAreas } from '../services/api';
 
-const DEFAULT_CENTER = [-80.1995, 25.8005]; // Wynwood Miami Arts District
-const DEFAULT_ZOOM = 15.2;
+const DEFAULT_CENTER = [-123.104, 49.263]; // Vancouver BC
+const DEFAULT_ZOOM = 14.5;
+
+// Placeholder SVG for broken/missing images
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
 
 export default function MapProspector({ theme, onWallSelected }) {
   const mapContainer = useRef(null);
@@ -53,6 +56,27 @@ export default function MapProspector({ theme, onWallSelected }) {
       ]);
       setCandidates(walls);
       setSearchAreas(areas);
+
+      // Auto-fly map to actual candidate coordinates when data loads
+      if (walls && walls.length > 0 && mapInstance.current) {
+        const map = mapInstance.current;
+        const firstWall = walls[0];
+        if (map.loaded()) {
+          map.flyTo({
+            center: [firstWall.longitude, firstWall.latitude],
+            zoom: 14.5,
+            speed: 1.2,
+            curve: 1.4,
+          });
+        } else {
+          map.once('load', () => {
+            map.flyTo({
+              center: [firstWall.longitude, firstWall.latitude],
+              zoom: 14.5,
+            });
+          });
+        }
+      }
     } catch (e) {
       console.error('Failed to load map prospector data:', e);
     }
@@ -226,6 +250,23 @@ export default function MapProspector({ theme, onWallSelected }) {
             </p>
           </div>
         </div>
+
+        {/* Refresh Button */}
+        <button
+          onClick={loadData}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '6px',
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '8px', padding: '6px 14px',
+            color: '#34d399', fontSize: '0.76rem', fontWeight: 700,
+            cursor: 'pointer', transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.22)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.12)'}
+        >
+          ↺ Refresh &amp; Fly to Results
+        </button>
 
         {/* Legend */}
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', fontSize: '0.74rem' }}>
@@ -410,18 +451,20 @@ export default function MapProspector({ theme, onWallSelected }) {
             </div>
 
             {/* Active Perspective Photo Preview */}
-            <div style={{ position: 'relative', width: '100%', height: '200px', background: '#000000' }}>
+            <div style={{ position: 'relative', width: '100%', height: '200px', background: '#0f172a' }}>
               {selectedWall.views && selectedWall.views[activeViewIdx] ? (
                 <img
                   src={selectedWall.views[activeViewIdx].preview_url}
                   alt={`View ${selectedWall.views[activeViewIdx].id}`}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
               ) : (
                 <img
-                  src={selectedWall.primary_view_preview_url || '/placeholder.jpg'}
-                  alt=""
+                  src={selectedWall.primary_view_preview_url || IMG_PLACEHOLDER}
+                  alt="Wall preview"
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
               )}
 
@@ -469,7 +512,7 @@ export default function MapProspector({ theme, onWallSelected }) {
                         border: i === activeViewIdx ? '2px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.2)',
                       }}
                     >
-                      <img src={v.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={v.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }} />
                     </div>
                   ))}
                 </div>

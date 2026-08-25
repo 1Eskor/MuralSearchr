@@ -23,6 +23,9 @@ import {
   fetchJob,
 } from '../services/api';
 
+
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
+
 export default function ImageryGallery({ theme, onImageryUpdated }) {
   const [imagery, setImagery] = useState([]);
   const [stats, setStats] = useState(null);
@@ -367,6 +370,7 @@ export default function ImageryGallery({ theme, onImageryUpdated }) {
                   alt={`Street view ${img.id}`}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   loading="lazy"
+                  onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
                 
                 {/* Heading Badge */}
@@ -469,11 +473,12 @@ export default function ImageryGallery({ theme, onImageryUpdated }) {
               </button>
             </div>
 
-            <div style={{ width: '100%', maxHeight: '460px', background: '#000000', display: 'flex', justifyContent: 'center' }}>
+            <div style={{ width: '100%', maxHeight: '460px', background: '#0f172a', display: 'flex', justifyContent: 'center' }}>
               <img
                 src={selectedImage.preview_url}
                 alt="Detailed Street View"
                 style={{ maxHeight: '460px', width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
+                onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
               />
             </div>
 

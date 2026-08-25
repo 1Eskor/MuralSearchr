@@ -24,6 +24,8 @@ import {
   getExportGeoJsonUrl,
 } from '../services/api';
 
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
+
 export default function SearchExportPanel({ theme }) {
   const [queryText, setQueryText] = useState('');
   const [minScore, setMinScore] = useState(0);
@@ -408,7 +410,8 @@ export default function SearchExportPanel({ theme }) {
                     alt={`Candidate ${c.id}`}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     loading="lazy"
-                  />
+                    onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
 
                   {/* ID Tag */}
                   <div style={{

@@ -26,6 +26,8 @@ import {
   fetchJob,
 } from '../services/api';
 
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
+
 export default function ScoringEnginePanel({ theme, onScoringFinished }) {
   const [weights, setWeights] = useState({
     wall_quality_weight: 0.30,
@@ -501,7 +503,8 @@ export default function ScoringEnginePanel({ theme, onScoringFinished }) {
                     alt={`Candidate ${c.id}`}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     loading="lazy"
-                  />
+                    onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
 
                   {/* Rank Badge */}
                   <div style={{
@@ -644,7 +647,8 @@ export default function ScoringEnginePanel({ theme, onScoringFinished }) {
                 src={selectedCandidate.primary_view_preview_url}
                 alt="Primary Perspective View"
                 style={{ maxHeight: '340px', width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
-              />
+                onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
             </div>
 
             <div style={{ padding: '20px' }}>

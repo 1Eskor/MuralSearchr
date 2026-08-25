@@ -23,6 +23,8 @@ import {
   fetchJob,
 } from '../services/api';
 
+const IMG_PLACEHOLDER = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='150' viewBox='0 0 200 150'><rect width='200' height='150' fill='%23111827'/><text x='50%25' y='50%25' font-family='sans-serif' font-size='13' fill='%23475569' text-anchor='middle' dy='.3em'>No Image</text></svg>`;
+
 export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
   const [spatialRadius, setSpatialRadius] = useState(15.0);
   const [visualSim, setVisualSim] = useState(0.90);
@@ -366,6 +368,7 @@ export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
                   alt={`Wall ${wall.id}`}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   loading="lazy"
+                  onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
                 />
 
                 {/* Canonical ID Badge */}
@@ -438,7 +441,8 @@ export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
                         src={v.preview_url}
                         alt={`Angle ${v.view_heading}`}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
+                        onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
                       <span style={{
                         position: 'absolute',
                         bottom: '0',
@@ -533,7 +537,8 @@ export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
                     src={selectedWall.views[activeViewIdx].preview_url}
                     alt={`View ${selectedWall.views[activeViewIdx].id}`}
                     style={{ maxHeight: '360px', width: 'auto', maxWidth: '100%', objectFit: 'contain' }}
-                  />
+                    onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
 
                   {/* Heading Overlay Pill */}
                   <div style={{
@@ -587,7 +592,8 @@ export default function DeduplicationPanel({ theme, onDeduplicationFinished }) {
                     }}
                   >
                     <div style={{ width: '100%', height: '60px', background: '#000', borderRadius: '4px', overflow: 'hidden', marginBottom: '4px' }}>
-                      <img src={v.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <img src={v.preview_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}   onError={e => { e.currentTarget.src = IMG_PLACEHOLDER; }}
+                />
                     </div>
                     <div style={{ fontSize: '0.70rem', textAlign: 'center', fontWeight: 600, color: idx === activeViewIdx ? '#f472b6' : 'var(--text-secondary)' }}>
                       {v.view_heading}&deg; Heading
