@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -14,8 +14,16 @@ import {
   Navigation,
   Sparkles,
   Search,
+  Scan,
+  Maximize2,
+  Minimize2,
+  Crosshair,
 } from 'lucide-react';
 import { extractGeodata, createSearchArea } from '../services/api';
+
+// Maximum allowable scanning area dimensions to ensure fast Overpass & Mapillary ingestion
+const MAX_SCAN_SPAN_LON = 0.018; // ~1.4 km longitude span
+const MAX_SCAN_SPAN_LAT = 0.014; // ~1.5 km latitude span
 
 const DISTRICT_PRESETS = [
   {
@@ -23,49 +31,42 @@ const DISTRICT_PRESETS = [
     name: 'Mount Pleasant / Mural District, Vancouver BC',
     center: [-123.1020, 49.2635],
     zoom: 15.5,
-    delta: 0.0038,
   },
   {
     id: 'vancouver_gastown',
     name: 'Gastown & Railtown, Vancouver BC',
     center: [-123.1070, 49.2830],
     zoom: 15.5,
-    delta: 0.0035,
   },
   {
     id: 'vancouver_granville',
     name: 'Granville Island / False Creek, Vancouver BC',
     center: [-123.1340, 49.2710],
     zoom: 15.5,
-    delta: 0.0035,
   },
   {
     id: 'wynwood',
     name: 'Wynwood Art District, Miami FL',
     center: [-80.1993, 25.8015],
-    zoom: 15,
-    delta: 0.0035,
+    zoom: 15.5,
   },
   {
     id: 'bushwick',
     name: 'Bushwick Collective, Brooklyn NY',
     center: [-73.9240, 40.7065],
-    zoom: 15,
-    delta: 0.0035,
+    zoom: 15.5,
   },
   {
     id: 'mission',
     name: 'Mission District, San Francisco CA',
     center: [-122.4185, 37.7590],
-    zoom: 15,
-    delta: 0.0035,
+    zoom: 15.5,
   },
   {
     id: 'shoreditch',
     name: 'Shoreditch Arts, London UK',
     center: [-0.0780, 51.5260],
-    zoom: 15,
-    delta: 0.0035,
+    zoom: 15.5,
   },
 ];
 
@@ -87,12 +88,113 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
   const [showBuildings, setShowBuildings] = useState(true);
   const [showPoints, setShowPoints] = useState(true);
 
+  // Active scanning polygon & viewport state
+  const [activePolygon, setActivePolygon] = useState(null);
+  const [scanMetrics, setScanMetrics] = useState({
+    isClamped: false,
+    zoom: '15.5',
+    center: [-123.1020, 49.2635],
+    areaKm2: '1.20',
+    widthMeters: 1350,
+    heightMeters: 1100,
+  });
+
+  // Calculate scanning polygon from map viewport or clamped maximum box
+  const calculateScanPolygon = useCallback((mapInstance) => {
+    if (!mapInstance) return null;
+
+    const bounds = mapInstance.getBounds();
+    const center = mapInstance.getCenter();
+    const zoom = mapInstance.getZoom();
+
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    const south = bounds.getSouth();
+    const north = bounds.getNorth();
+
+    const spanLon = Math.abs(east - west);
+    const spanLat = Math.abs(north - south);
+
+    let minLon, maxLon, minLat, maxLat;
+    let isClamped = false;
+
+    if (spanLon > MAX_SCAN_SPAN_LON || spanLat > MAX_SCAN_SPAN_LAT) {
+      // Zoomed out past maximum scanning threshold -> clamp to maximum area centered on viewport
+      isClamped = true;
+      const halfLon = MAX_SCAN_SPAN_LON / 2.0;
+      const halfLat = MAX_SCAN_SPAN_LAT / 2.0;
+      minLon = center.lng - halfLon;
+      maxLon = center.lng + halfLon;
+      minLat = center.lat - halfLat;
+      maxLat = center.lat + halfLat;
+    } else {
+      // Zoomed in -> scan the exact visible map viewport!
+      isClamped = false;
+      minLon = west;
+      maxLon = east;
+      minLat = south;
+      maxLat = north;
+    }
+
+    const polyGeoJSON = {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [minLon, minLat],
+          [maxLon, minLat],
+          [maxLon, maxLat],
+          [minLon, maxLat],
+          [minLon, minLat],
+        ],
+      ],
+    };
+
+    const latRad = (center.lat * Math.PI) / 180.0;
+    const widthM = Math.round(Math.abs(maxLon - minLon) * 111320 * Math.cos(latRad));
+    const heightM = Math.round(Math.abs(maxLat - minLat) * 110540);
+    const areaKm2 = ((widthM * heightM) / 1_000_000).toFixed(2);
+
+    return {
+      polygon: polyGeoJSON,
+      metrics: {
+        isClamped,
+        zoom: zoom.toFixed(1),
+        center: [center.lng, center.lat],
+        areaKm2,
+        widthMeters: widthM,
+        heightMeters: heightM,
+      },
+    };
+  }, []);
+
+  // Update map source & state on map move/zoom
+  const updateScanArea = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const res = calculateScanPolygon(map);
+    if (!res) return;
+
+    setActivePolygon(res.polygon);
+    setScanMetrics(res.metrics);
+
+    const src = map.getSource('search-polygon-source');
+    if (src) {
+      src.setData(res.polygon);
+    }
+  }, [calculateScanPolygon]);
+
+  // Handle Live Geocoding Search
   const handleLocationSearch = async (e) => {
     if (e) e.preventDefault();
     if (!customSearchQuery.trim()) return;
     setIsSearchingLocation(true);
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(customSearchQuery)}&limit=1`);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+          customSearchQuery
+        )}&limit=1`
+      );
       const data = await res.json();
       if (data && data.length > 0) {
         const lat = parseFloat(data[0].lat);
@@ -102,12 +204,13 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
           name: data[0].display_name.split(',').slice(0, 3).join(','),
           center: [lon, lat],
           zoom: 15.5,
-          delta: 0.0040,
         };
         setSelectedPreset(newPreset);
-        handlePresetChange(newPreset);
+        if (mapRef.current) {
+          mapRef.current.flyTo({ center: [lon, lat], zoom: 15.5, speed: 1.4 });
+        }
       } else {
-        alert('Location not found. Try searching for "Vancouver, Canada" or "Mount Pleasant, Vancouver"');
+        alert('Location not found. Try searching for a specific city or neighborhood (e.g. "Vancouver, Canada" or "Wynwood, Miami")');
       }
     } catch (err) {
       console.error('Geocoder error:', err);
@@ -116,22 +219,15 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
     }
   };
 
-  // Generate GeoJSON polygon for current preset center & delta
-  const getActivePolygonGeoJSON = (preset = selectedPreset) => {
-    const [lon, lat] = preset.center;
-    const d = preset.delta;
-    return {
-      type: 'Polygon',
-      coordinates: [
-        [
-          [lon - d, lat - d],
-          [lon + d, lat - d],
-          [lon + d, lat + d],
-          [lon - d, lat + d],
-          [lon - d, lat - d],
-        ],
-      ],
-    };
+  // Handle Preset Selection
+  const handlePresetChange = (preset) => {
+    setSelectedPreset(preset);
+    setExtractedData(null);
+    setSaveSuccess(false);
+
+    if (mapRef.current) {
+      mapRef.current.flyTo({ center: preset.center, zoom: preset.zoom, speed: 1.4 });
+    }
   };
 
   // Initialize MapLibre GL instance
@@ -168,11 +264,14 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
       ],
     };
 
+    const initialCenter = selectedPreset.center;
+    const initialZoom = selectedPreset.zoom;
+
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: selectedPreset.center,
-      zoom: selectedPreset.zoom,
+      center: initialCenter,
+      zoom: initialZoom,
       attributionControl: true,
     });
 
@@ -180,10 +279,18 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
     mapRef.current = map;
 
     map.on('load', () => {
-      // Add Search Polygon source and layers
+      const initialScan = calculateScanPolygon(map);
+      const polyData = initialScan ? initialScan.polygon : { type: 'Polygon', coordinates: [] };
+
+      if (initialScan) {
+        setActivePolygon(initialScan.polygon);
+        setScanMetrics(initialScan.metrics);
+      }
+
+      // Add Search Polygon source and layers (~30% opacity blue rectangle)
       map.addSource('search-polygon-source', {
         type: 'geojson',
-        data: getActivePolygonGeoJSON(selectedPreset),
+        data: polyData,
       });
 
       map.addLayer({
@@ -191,8 +298,8 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
         type: 'fill',
         source: 'search-polygon-source',
         paint: {
-          'fill-color': '#06b6d4',
-          'fill-opacity': 0.12,
+          'fill-color': '#2563eb',
+          'fill-opacity': 0.30, // ~30% opacity blue rectangle as specified
         },
       });
 
@@ -201,9 +308,9 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
         type: 'line',
         source: 'search-polygon-source',
         paint: {
-          'line-color': '#06b6d4',
+          'line-color': '#60a5fa',
           'line-width': 2.5,
-          'line-dasharray': [2, 2],
+          'line-dasharray': [4, 2],
         },
       });
 
@@ -305,34 +412,17 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
       map.on('mouseleave', 'sample-points-layer', () => {
         map.getCanvas().style.cursor = '';
       });
+
+      // Sync scan area on map pan / zoom / drag in real-time!
+      map.on('move', updateScanArea);
+      map.on('zoom', updateScanArea);
+      map.on('resize', updateScanArea);
     });
 
     return () => {
       map.remove();
     };
-  }, [theme]);
-
-  // Handle Preset District Change
-  const handlePresetChange = (preset) => {
-    setSelectedPreset(preset);
-    setExtractedData(null);
-    setSaveSuccess(false);
-
-    if (mapRef.current) {
-      mapRef.current.flyTo({ center: preset.center, zoom: preset.zoom, speed: 1.4 });
-      const src = mapRef.current.getSource('search-polygon-source');
-      if (src) {
-        src.setData(getActivePolygonGeoJSON(preset));
-      }
-      // Reset layers
-      const roadsSrc = mapRef.current.getSource('roads-source');
-      if (roadsSrc) roadsSrc.setData({ type: 'FeatureCollection', features: [] });
-      const bldgSrc = mapRef.current.getSource('buildings-source');
-      if (bldgSrc) bldgSrc.setData({ type: 'FeatureCollection', features: [] });
-      const ptsSrc = mapRef.current.getSource('sample-points-source');
-      if (ptsSrc) ptsSrc.setData({ type: 'FeatureCollection', features: [] });
-    }
-  };
+  }, [theme, calculateScanPolygon, updateScanArea]);
 
   // Toggle Layer Visibility
   useEffect(() => {
@@ -349,15 +439,15 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
     }
   }, [showRoads, showBuildings, showPoints]);
 
-  // Execute Geographic Extraction
+  // Execute Geographic Extraction on the EXACT polygon currently covered by the blue rectangle
   const handleExtractGeodata = async () => {
+    if (!activePolygon) return;
     setIsExtracting(true);
     setSaveSuccess(false);
 
-    const polyGeoJSON = getActivePolygonGeoJSON(selectedPreset);
     try {
       const data = await extractGeodata({
-        polygon_geojson: polyGeoJSON,
+        polygon_geojson: activePolygon,
         step_distance_meters: Number(stepDistance),
         max_building_distance_meters: Number(maxBuildingDist),
         provider: 'osm',
@@ -406,12 +496,18 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
 
   // Save Search Area to SQLite DB
   const handleSaveSearchArea = async () => {
-    if (!extractedData) return;
+    if (!extractedData || !activePolygon) return;
     setIsSaving(true);
     try {
+      const areaName = customSearchQuery.trim()
+        ? customSearchQuery
+        : selectedPreset?.name
+        ? `${selectedPreset.name} (Scan ${scanMetrics.areaKm2}km²)`
+        : `Target Area (${scanMetrics.center[1].toFixed(4)}, ${scanMetrics.center[0].toFixed(4)})`;
+
       await createSearchArea({
-        name: selectedPreset.name,
-        polygon_geojson: getActivePolygonGeoJSON(selectedPreset),
+        name: areaName,
+        polygon_geojson: activePolygon,
         total_roads: extractedData.total_roads,
         total_buildings: extractedData.total_buildings,
         sample_points_count: extractedData.total_sample_points,
@@ -432,15 +528,15 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '14px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ padding: '8px', borderRadius: '10px', background: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4' }}>
-              <MapIcon size={20} />
+            <div style={{ padding: '8px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6' }}>
+              <Scan size={20} />
             </div>
             <div>
               <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
                 Phase 2: Geographic Search & Wall Sampling
               </h2>
               <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', margin: '2px 0 0 0' }}>
-                OpenStreetMap road network extraction, line interpolation, heading calculation & building proximity filtering
+                Pan & zoom to dynamically frame your target scanning area. Extracts real OpenStreetMap road networks and building footprints.
               </p>
             </div>
           </div>
@@ -483,7 +579,7 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
 
           {/* Preset Selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 500 }}>or District:</span>
+            <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 500 }}>or Preset:</span>
             <select
               value={selectedPreset.id}
               onChange={(e) => {
@@ -566,63 +662,119 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
         </div>
 
         {/* Extraction Button */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
           <button
             onClick={handleExtractGeodata}
-            disabled={isExtracting}
+            disabled={isExtracting || !activePolygon}
             className="btn-primary"
-            style={{ width: '100%', justifyContent: 'center' }}
+            style={{
+              width: '100%',
+              justifyContent: 'center',
+              background: 'linear-gradient(135deg, #2563eb 0%, #3b82f6 100%)',
+              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+            }}
           >
             {isExtracting ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                <span>Querying OSM...</span>
+                <span>Querying OpenStreetMap...</span>
               </>
             ) : (
               <>
-                <Play size={16} />
-                <span>Extract Roads & Sample</span>
+                <Scan size={16} />
+                <span>Extract Roads & Sample ({scanMetrics.areaKm2} km²)</span>
               </>
             )}
           </button>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+            Scans exact area inside the blue overlay rectangle
+          </span>
         </div>
 
       </div>
 
-      {/* Map Container */}
-      <div style={{ position: 'relative', width: '100%', height: '480px', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-subtle)', marginBottom: '18px' }}>
+      {/* Map Container with Real-Time Viewport & Clamped Scanner */}
+      <div style={{ position: 'relative', width: '100%', height: '520px', borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--border-subtle)', marginBottom: '18px' }}>
         <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
+
+        {/* Top-Left Live Scanning Area HUD */}
+        <div style={{
+          position: 'absolute',
+          top: '12px',
+          left: '12px',
+          background: 'rgba(15, 23, 42, 0.90)',
+          backdropFilter: 'blur(14px)',
+          border: scanMetrics.isClamped ? '1px solid rgba(59, 130, 246, 0.6)' : '1px solid rgba(16, 185, 129, 0.4)',
+          borderRadius: '10px',
+          padding: '10px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          fontSize: '0.78rem',
+          zIndex: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+          maxWidth: '360px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, color: scanMetrics.isClamped ? '#60a5fa' : '#34d399' }}>
+              <Crosshair size={15} />
+              <span>{scanMetrics.isClamped ? 'Max Scan Area (Clamped)' : 'Active Viewport Scan'}</span>
+            </div>
+            <span style={{
+              fontSize: '0.70rem',
+              fontWeight: 700,
+              padding: '2px 6px',
+              borderRadius: '4px',
+              background: scanMetrics.isClamped ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+              color: scanMetrics.isClamped ? '#93c5fd' : '#6ee7b7',
+            }}>
+              Zoom {scanMetrics.zoom}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '0.76rem', color: '#cbd5e1' }}>
+            <strong>Coverage:</strong> {scanMetrics.widthMeters.toLocaleString()}m × {scanMetrics.heightMeters.toLocaleString()}m &bull; <strong style={{ color: '#38bdf8' }}>{scanMetrics.areaKm2} km²</strong>
+          </div>
+
+          <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+            <strong>Center:</strong> {scanMetrics.center[1].toFixed(4)}°N, {scanMetrics.center[0].toFixed(4)}°W
+          </div>
+
+          <div style={{ fontSize: '0.70rem', color: scanMetrics.isClamped ? '#93c5fd' : '#a7f3d0', marginTop: '2px', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '4px' }}>
+            {scanMetrics.isClamped
+              ? '🟦 Drag the map to position the blue scanning box over your target district.'
+              : '🎯 Scanning entire visible screen area. Zoom out to scan a larger neighborhood.'}
+          </div>
+        </div>
 
         {/* Map Overlay Layer Toggles */}
         <div style={{
           position: 'absolute',
           top: '12px',
-          left: '12px',
-          background: 'var(--bg-header, rgba(7, 10, 18, 0.85))',
+          right: '54px', // Right before MapLibre navigation buttons
+          background: 'rgba(15, 23, 42, 0.88)',
           backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '10px',
-          padding: '10px 14px',
+          padding: '8px 12px',
           display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          fontSize: '0.78rem',
+          gap: '12px',
+          fontSize: '0.76rem',
           zIndex: 10,
+          alignItems: 'center',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
         }}>
-          <div style={{ fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Layers size={13} /> Active Layers
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#818cf8' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: '#818cf8', fontWeight: 600 }}>
             <input type="checkbox" checked={showRoads} onChange={(e) => setShowRoads(e.target.checked)} />
-            <span>Road Network</span>
+            <span>Roads</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#f59e0b' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: '#f59e0b', fontWeight: 600 }}>
             <input type="checkbox" checked={showBuildings} onChange={(e) => setShowBuildings(e.target.checked)} />
-            <span>Building Footprints</span>
+            <span>Buildings</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: '#34d399' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', color: '#34d399', fontWeight: 600 }}>
             <input type="checkbox" checked={showPoints} onChange={(e) => setShowPoints(e.target.checked)} />
-            <span>Candidate Coordinates</span>
+            <span>Candidate Pins</span>
           </label>
         </div>
 
@@ -631,7 +783,7 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
           position: 'absolute',
           bottom: '12px',
           left: '12px',
-          background: 'var(--bg-header, rgba(7, 10, 18, 0.85))',
+          background: 'rgba(15, 23, 42, 0.90)',
           backdropFilter: 'blur(12px)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '8px',
@@ -642,6 +794,10 @@ export default function MapExplorer({ theme, onSearchAreaCreated }) {
           fontSize: '0.74rem',
           zIndex: 10,
         }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span style={{ width: '12px', height: '8px', background: 'rgba(59, 130, 246, 0.3)', border: '1px solid #60a5fa', borderRadius: '2px' }} />
+            <span style={{ color: '#93c5fd' }}>Scan Target Overlay</span>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
             <span>Wall &lt;15m</span>

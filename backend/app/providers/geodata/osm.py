@@ -19,9 +19,11 @@ from backend.app.providers.geodata.mock import MockGeoProvider
 
 
 OVERPASS_ENDPOINTS = [
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
+    "https://overpass.openstreetmap.fr/api/interpreter",
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
-    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 
 
@@ -31,9 +33,8 @@ class OSMOverpassProvider(GeoDataProvider):
     Extracts road networks & building footprints and performs spatial candidate point sampling.
     """
 
-    def __init__(self, timeout_seconds: float = 6.0):
+    def __init__(self, timeout_seconds: float = 12.0):
         self.timeout_seconds = timeout_seconds
-        self.mock_fallback = MockGeoProvider()
 
     def get_info(self) -> ProviderInfo:
         return ProviderInfo(
@@ -50,9 +51,10 @@ class OSMOverpassProvider(GeoDataProvider):
         """
         Execute an Overpass QL query with multi-endpoint failover and retry logic.
         """
+        headers = {"User-Agent": "MuralSearch/1.0 (contact@muralsearch.dev)"}
         for endpoint in OVERPASS_ENDPOINTS:
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as client:
                     resp = await client.post(endpoint, data={"data": query})
                     if resp.status_code == 200:
                         return resp.json()
@@ -61,7 +63,7 @@ class OSMOverpassProvider(GeoDataProvider):
                 logger.warning(f"Failed to query Overpass endpoint {endpoint}: {e}")
                 continue
 
-        logger.info("Overpass endpoints unavailable or timed out; utilizing fallback generation.")
+        logger.warning("All Overpass endpoints failed or timed out.")
         return None
 
     def _extract_bbox(self, polygon_geojson: Dict[str, Any]) -> Tuple[float, float, float, float]:
@@ -79,23 +81,17 @@ class OSMOverpassProvider(GeoDataProvider):
                 return polygon_geojson["geometry"]["coordinates"][0]
         except Exception:
             pass
-        return [(-74.008, 40.711), (-74.004, 40.711), (-74.004, 40.715), (-74.008, 40.715), (-74.008, 40.711)]
-
-    def _format_poly_filter(self, polygon_geojson: Dict[str, Any]) -> str:
-        """Format coordinates for Overpass poly filter: 'lat1 lon1 lat2 lon2 ...'"""
-        coords = self._get_poly_coords(polygon_geojson)
-        poly_str = " ".join(f"{c[1]:.6f} {c[0]:.6f}" for c in coords)
-        return poly_str
+        return [(-123.109, 49.260), (-123.099, 49.260), (-123.099, 49.268), (-123.109, 49.268), (-123.109, 49.260)]
 
     async def extract_roads(self, polygon_geojson: Dict[str, Any]) -> List[RoadSegment]:
         """
-        Extract road network geometries from OpenStreetMap within the polygon.
+        Extract road network geometries from OpenStreetMap within the polygon/bbox.
         """
-        poly_str = self._format_poly_filter(polygon_geojson)
+        min_lat, min_lon, max_lat, max_lon = self._extract_bbox(polygon_geojson)
         query = f"""
         [out:json][timeout:{int(self.timeout_seconds)}];
         (
-          way["highway"~"^(primary|secondary|tertiary|residential|unclassified|service|living_street|pedestrian|trunk)$"](poly:"{poly_str}");
+          way["highway"]({min_lat:.6f},{min_lon:.6f},{max_lat:.6f},{max_lon:.6f});
         );
         out body;
         >;
@@ -103,8 +99,8 @@ class OSMOverpassProvider(GeoDataProvider):
         """
         data = await self._query_overpass(query)
         if not data or "elements" not in data:
-            logger.info("Overpass query returned no results; using fallback road generator")
-            return await self.mock_fallback.extract_roads(polygon_geojson)
+            logger.info("Overpass query returned no results for roads.")
+            return []
 
         nodes: Dict[int, Tuple[float, float]] = {}
         for elem in data["elements"]:
@@ -132,17 +128,17 @@ class OSMOverpassProvider(GeoDataProvider):
                     )
 
         logger.info(f"Extracted {len(roads)} road segments from OpenStreetMap")
-        return roads if roads else await self.mock_fallback.extract_roads(polygon_geojson)
+        return roads
 
     async def extract_buildings(self, polygon_geojson: Dict[str, Any]) -> List[BuildingFootprint]:
         """
-        Extract building footprint polygons from OpenStreetMap within the polygon.
+        Extract building footprint polygons from OpenStreetMap within the polygon/bbox.
         """
-        poly_str = self._format_poly_filter(polygon_geojson)
+        min_lat, min_lon, max_lat, max_lon = self._extract_bbox(polygon_geojson)
         query = f"""
         [out:json][timeout:{int(self.timeout_seconds)}];
         (
-          way["building"](poly:"{poly_str}");
+          way["building"]({min_lat:.6f},{min_lon:.6f},{max_lat:.6f},{max_lon:.6f});
         );
         out body;
         >;
@@ -150,7 +146,8 @@ class OSMOverpassProvider(GeoDataProvider):
         """
         data = await self._query_overpass(query)
         if not data or "elements" not in data:
-            return await self.mock_fallback.extract_buildings(polygon_geojson)
+            logger.info("Overpass query returned no results for buildings.")
+            return []
 
         nodes: Dict[int, Tuple[float, float]] = {}
         for elem in data["elements"]:
@@ -185,33 +182,40 @@ class OSMOverpassProvider(GeoDataProvider):
                     )
 
         logger.info(f"Extracted {len(buildings)} building footprints from OpenStreetMap")
-        return buildings if buildings else await self.mock_fallback.extract_buildings(polygon_geojson)
+        return buildings
 
     async def generate_sample_points(
         self,
         polygon_geojson: Dict[str, Any],
         step_distance_meters: float = 20.0,
         max_building_distance_meters: float = 35.0,
+        roads: Optional[List[RoadSegment]] = None,
+        buildings: Optional[List[BuildingFootprint]] = None,
     ) -> List[SamplePoint]:
         """
         High-performance candidate point generation:
-        1. Extract roads and buildings concurrently.
+        1. Extract roads and buildings concurrently (if not pre-fetched).
         2. Project to metric Cartesian coordinate system centered on polygon.
         3. Line-interpolate sample coordinates at step_distance_meters.
         4. Calculate directional bearing (heading) along road vector.
         5. Build STRtree spatial index over building footprint polygons.
         6. Filter points within max_building_distance_meters of buildings.
         """
-        # 1. Concurrently extract roads and buildings
-        roads, buildings = await asyncio.gather(
-            self.extract_roads(polygon_geojson),
-            self.extract_buildings(polygon_geojson),
-        )
+        # 1. Fetch roads and buildings concurrently if not already provided
+        if roads is None or buildings is None:
+            fetch_r = self.extract_roads(polygon_geojson) if roads is None else None
+            fetch_b = self.extract_buildings(polygon_geojson) if buildings is None else None
+            
+            results = await asyncio.gather(
+                fetch_r if fetch_r else asyncio.sleep(0, result=roads),
+                fetch_b if fetch_b else asyncio.sleep(0, result=buildings),
+            )
+            roads = results[0]
+            buildings = results[1]
 
         if not roads:
-            return await self.mock_fallback.generate_sample_points(
-                polygon_geojson, step_distance_meters, max_building_distance_meters
-            )
+            logger.warning("No road geometries found in target area to generate sample points.")
+            return []
 
         # 2. Compute local center latitude for projection
         min_lat, min_lon, max_lat, max_lon = self._extract_bbox(polygon_geojson)

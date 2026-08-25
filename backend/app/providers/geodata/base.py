@@ -53,6 +53,8 @@ class GeoDataProvider(BaseProvider):
         polygon_geojson: Dict[str, Any],
         step_distance_meters: float = 20.0,
         max_building_distance_meters: float = 35.0,
+        roads: Optional[List[RoadSegment]] = None,
+        buildings: Optional[List[BuildingFootprint]] = None,
     ) -> List[SamplePoint]:
         """
         Generate candidate inspection coordinates along roads filtered by building proximity.

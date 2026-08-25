@@ -1,6 +1,6 @@
 import math
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from backend.app.providers.base import ProviderInfo, ProviderStatus
 from backend.app.providers.geodata.base import (
     BuildingFootprint,
@@ -88,6 +88,8 @@ class MockGeoProvider(GeoDataProvider):
         polygon_geojson: Dict[str, Any],
         step_distance_meters: float = 20.0,
         max_building_distance_meters: float = 35.0,
+        roads: Optional[List[RoadSegment]] = None,
+        buildings: Optional[List[BuildingFootprint]] = None,
     ) -> List[SamplePoint]:
         coords = self._extract_centroid(polygon_geojson)
         base_lat, base_lon = coords["lat"], coords["lon"]

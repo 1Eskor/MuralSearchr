@@ -12,7 +12,7 @@ export default function ProviderMatrix({ config }) {
       icon: Map,
       color: '#6366f1',
       desc: 'Extracts road networks & building footprints for candidate coordinate generation.',
-      active: activeMap.geodata || 'osm (mocked in Phase 1)'
+      active: activeMap.geodata || 'osm'
     },
     {
       id: 'imagery',
@@ -20,7 +20,7 @@ export default function ProviderMatrix({ config }) {
       icon: Image,
       color: '#06b6d4',
       desc: 'Retrieves multi-view street-level imagery and caches locally.',
-      active: activeMap.imagery || 'mapillary (mocked in Phase 1)'
+      active: activeMap.imagery || 'mapillary'
     },
     {
       id: 'vision_ranker',
@@ -28,7 +28,7 @@ export default function ProviderMatrix({ config }) {
       icon: Eye,
       color: '#8b5cf6',
       desc: 'Fast local embedding prompt comparison (OpenCLIP / SigLIP) on bulk photos.',
-      active: activeMap.vision_ranker || 'openclip (mocked in Phase 1)'
+      active: activeMap.vision_ranker || 'siglip2'
     },
     {
       id: 'vision_analyzer',
@@ -36,7 +36,7 @@ export default function ProviderMatrix({ config }) {
       icon: Compass,
       color: '#10b981',
       desc: 'Structured wall attribute extractor (Local VLM / OpenAI verification).',
-      active: activeMap.vision_analyzer || 'local_vlm (mocked in Phase 1)'
+      active: activeMap.vision_analyzer || 'local_vlm'
     },
   ];
 

@@ -24,16 +24,20 @@ async def extract_geographic_data(req: ExtractionRequest):
     provider = registry.get_geodata_provider(req.provider)
 
     try:
-        # 1. Concurrently fetch roads, buildings, and sample points
-        roads_task = provider.extract_roads(req.polygon_geojson)
-        bldgs_task = provider.extract_buildings(req.polygon_geojson)
-        points_task = provider.generate_sample_points(
+        # 1. Fetch roads and buildings concurrently from OSM
+        roads, buildings = await asyncio.gather(
+            provider.extract_roads(req.polygon_geojson),
+            provider.extract_buildings(req.polygon_geojson),
+        )
+
+        # 2. Generate building-proximity sample points using the extracted geometries
+        sample_points = await provider.generate_sample_points(
             req.polygon_geojson,
             step_distance_meters=req.step_distance_meters,
             max_building_distance_meters=req.max_building_distance_meters,
+            roads=roads,
+            buildings=buildings,
         )
-
-        roads, buildings, sample_points = await asyncio.gather(roads_task, bldgs_task, points_task)
 
         # 2. Build GeoJSON feature representations for frontend rendering
         roads_features = []
