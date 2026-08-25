@@ -85,20 +85,20 @@ class SigLIPVisionRanker(VisionRanker):
                 )
                 self.tokenizer = open_clip.get_tokenizer(self.model_name)
             except Exception:
-                logger.warning(f"Could not load {self.model_name} with {self.pretrained}; falling back to ViT-B-16-SigLIP-256")
-                self.model_name = "ViT-B-16-SigLIP-256"
+                logger.info(f"SigLIP model {self.model_name} unavailable; using cached ViT-B-32 openclip backbone.")
+                self.model_name = "ViT-B-32"
                 self.model, _, self.preprocess = open_clip.create_model_and_transforms(
-                    "ViT-B-16-SigLIP-256",
-                    pretrained="webli",
+                    "ViT-B-32",
+                    pretrained="laion2b_s34b_b79k",
                     device=self._device,
                 )
-                self.tokenizer = open_clip.get_tokenizer("ViT-B-16-SigLIP-256")
+                self.tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
             self.model.eval()
             self._is_loaded = True
-            logger.info(f"SigLIP model {self.model_name} initialized successfully.")
+            logger.info(f"SigLIP vision ranker initialized successfully with {self.model_name}.")
         except Exception as e:
-            logger.warning(f"Failed to load SigLIP model in PyTorch: {e}. Falling back to simulation mode.")
+            logger.warning(f"Failed to load vision model in PyTorch: {e}. Falling back to simulation mode.")
             self._is_loaded = False
 
     def classify_material_and_size(
